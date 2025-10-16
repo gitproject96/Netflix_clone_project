@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         APP_NAME = "netflix-clone"
-        APP_VERSION = "v1.0.0"
+        APP_VERSION = "v1.0.${BUILD_NUMBER}"  // Auto incremented with each build
         DOCKER_IMAGE = "${APP_NAME}:${APP_VERSION}"
         DOCKER_HUB_USERNAME = "mydocker691"
     }
@@ -25,8 +25,31 @@ pipeline {
             }
         }
 
-        // 3️⃣ Push Docker Image to Docker Hub
+        // 3️⃣ Health Check
+        stage('Health Check') {
+            steps {
+                script {
+                    sh """
+                    docker rm -f ${APP_NAME} || true
+                    docker run -d --name ${APP_NAME} -p 5000:5000 ${DOCKER_IMAGE}
+                    STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000)
+                    if [ $STATUS -ne 200 ]; then
+                        echo "Health check failed!"
+                        exit 1
+                    else
+                        echo "App is running and healthy."
+                    fi
+                    docker rm -f ${APP_NAME}
+                    """
+                }
+            }
+        }
+
+        // 4️⃣ Push Docker Image to Docker Hub (only main branch)
         stage('Push to Docker Hub') {
+            when {
+                branch 'main'
+            }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     script {
@@ -44,10 +67,10 @@ pipeline {
             echo 'Pipeline finished.'
         }
         success {
-            echo 'Build and push successful!'
+            echo "Build, health check, and push successful! Version: ${APP_VERSION}"
         }
         failure {
-            echo 'Build or push failed.'
+            echo 'Build or deployment failed.'
         }
     }
 }
