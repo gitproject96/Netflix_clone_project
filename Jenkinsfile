@@ -2,73 +2,53 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
-        KUBECONFIG_FILE = credentials('kubeconfig')
+        APP_NAME = "netflix-clone"
+        APP_VERSION = "v1.0.0"
+        DOCKER_IMAGE = "${APP_NAME}:${APP_VERSION}"
     }
 
     stages {
-
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
-                git(
-                    url: 'https://github.com/gitproject96/mini-banking-app2.0.git',
-                    branch: 'main',
-                    credentialsId: 'github-cred'
-                )
+                git branch: 'main', url: 'https://your-repo-url.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Short Git commit hash
-                    def COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    def IMAGE_TAG = "mydocker691/banking-app:${BUILD_NUMBER}-${COMMIT}"
-
-                    // Build Docker image and pass APP_VERSION
-                    sh """
-                        docker build --build-arg APP_VERSION=${BUILD_NUMBER}-${COMMIT} -t ${IMAGE_TAG} .
-                    """
-
-                    // Save tag for later stages
-                    env.IMAGE_TAG = IMAGE_TAG
+                    docker.build(DOCKER_IMAGE, "--build-arg APP_VERSION=${APP_VERSION} .")
                 }
             }
         }
 
-        stage('Push to DockerHub') {
+        stage('Run Container Locally') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', passwordVariable: 'DOCKERHUB_PSW', usernameVariable: 'DOCKERHUB_USER')]) {
-                    sh "echo $DOCKERHUB_PSW | docker login -u $DOCKERHUB_USER --password-stdin"
-                    sh "docker push ${IMAGE_TAG}"
+                script {
+                    sh "docker rm -f ${APP_NAME} || true"
+                    sh "docker run -d --name ${APP_NAME} -p 5000:5000 ${DOCKER_IMAGE}"
                 }
             }
         }
 
-        stage('Deploy to Kubernetes') {
-    steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
-            // Replace IMAGE_PLACEHOLDER only in the image line
-            sh "sed -i '/image:/ s|IMAGE_PLACEHOLDER|${IMAGE_TAG}|' k8s/deployment.yaml"
-
-            // Apply deployment and service
-            sh "kubectl --kubeconfig=$KUBECONFIG apply -f k8s/deployment.yaml"
-            sh "kubectl --kubeconfig=$KUBECONFIG apply -f k8s/service.yaml"
-
-            // Rolling restart
-            sh "kubectl --kubeconfig=$KUBECONFIG rollout restart deployment banking-app"
+        // Optional: push to Docker Hub
+        /*
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                    sh "echo $PASS | docker login -u $USER --password-stdin"
+                    sh "docker tag ${DOCKER_IMAGE} yourdockerhubusername/${DOCKER_IMAGE}"
+                    sh "docker push yourdockerhubusername/${DOCKER_IMAGE}"
+                }
+            }
         }
-    }
-}
-
+        */
     }
 
     post {
-        success {
-            echo "✅ Pipeline completed successfully! Deployed image: ${IMAGE_TAG}"
-        }
-        failure {
-            echo "❌ Pipeline failed."
+        always {
+            echo 'Pipeline finished.'
         }
     }
 }
+
